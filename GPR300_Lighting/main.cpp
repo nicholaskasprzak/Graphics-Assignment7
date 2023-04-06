@@ -202,9 +202,40 @@ public:
 
 		// Attach render buffer object to the frame buffer
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
-		// Reserve data with tex2D?
-		// Attach render buffer to a texture buffer?
-		//glFramebufferTexture2D()
+		
+		/*
+		* Shadow mapping portion
+		*/
+
+		// Is this setup different from that in the render buffer?
+		// Does it source it's texture image from that of the depth
+		// buffer held in the render buffer?
+
+		// Replace depth render buffer object with the texture?
+
+		// Reserve space for the depth buffer texture.
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+
+		// Attach the depth texture to the framebuffer
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+
+		// The above two function calls may be irrelevant here.
+		// Apparently the depth only FBO has to specifically
+		// not draw colors, specified as such with glDrawBuffer(GL_NONE)
+		// among other things, so the next line would cause
+		// conflicts. It also should ONLY have a depth component
+		// (and texture component in the form of the depth
+		// component texture I guess?), which isn't possible
+		// within this class setup.
+
+		// The scene is drawn into the shadow map specifically?
+
+		// Should I handle this with an override?
+
+		// Consider getting Render Doc if any issues pop up in testing
+		// Also consider splitting scene draws into different functions.
+		// Models and such were put in global scope for the sake of
+		// having it work. Bad architecture but it doesn't matter here.
 
 		// Specify how many attachments are being used in drawing
 		glDrawBuffers(mTexturesLength, attachments);
@@ -249,6 +280,7 @@ public:
 private:
 	unsigned int fbo;
 	unsigned int* textures;
+	unsigned int depth;
 	unsigned int rbo;
 
 	int mWidth, mHeight;

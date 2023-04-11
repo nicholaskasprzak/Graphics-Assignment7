@@ -4,7 +4,6 @@
 #include <glm/gtc/type_ptr.hpp>
 
 namespace ew {
-	/*
 	void createPlane(float width, float height, MeshData& meshData) {
 		meshData.vertices.clear();
 		meshData.indices.clear();
@@ -12,10 +11,10 @@ namespace ew {
 		float halfHeight = height / 2.0f;
 		Vertex vertices[4] = {
 			//Front face
-			{glm::vec3(-halfWidth, 0, -halfHeight), glm::vec3(0,1,0)}, //BL
-			{glm::vec3(+halfWidth, 0, -halfHeight), glm::vec3(0,1,0)}, //BR
-			{glm::vec3(+halfWidth, 0, +halfHeight), glm::vec3(0,1,0)}, //TR
-			{glm::vec3(-halfWidth, 0, +halfHeight), glm::vec3(0,1,0)} //TL
+			{glm::vec3(-halfWidth, 0, -halfHeight), glm::vec3(0,1,0), glm::vec2(0, 0), glm::vec3(0, 0, 0)}, //BL
+			{glm::vec3(+halfWidth, 0, -halfHeight), glm::vec3(0,1,0), glm::vec2(1, 0), glm::vec3(0, 0, 0)}, //BR
+			{glm::vec3(+halfWidth, 0, +halfHeight), glm::vec3(0,1,0), glm::vec2(1, 1), glm::vec3(0, 0, 0)}, //TR
+			{glm::vec3(-halfWidth, 0, +halfHeight), glm::vec3(0,1,0), glm::vec2(0, 1), glm::vec3(0, 0, 0)} //TL
 		};
 		meshData.vertices.assign(&vertices[0], &vertices[4]);
 		unsigned int indices[6] = {
@@ -24,8 +23,32 @@ namespace ew {
 			0, 3, 2
 		};
 		meshData.indices.assign(&indices[0], &indices[6]);
+
+		// Calculate tangents
+		for (int i = 0; i < meshData.indices.size(); i += 3)
+		{
+			Vertex& vertex1 = meshData.vertices[meshData.indices[i]];
+			Vertex& vertex2 = meshData.vertices[meshData.indices[i + 1]];
+			Vertex& vertex3 = meshData.vertices[meshData.indices[i + 2]];
+
+			glm::vec3 edge1 = vertex2.position - vertex1.position;
+			glm::vec3 edge2 = vertex3.position - vertex1.position;
+
+			glm::vec2 deltaUV1 = vertex2.uv - vertex1.uv;
+			glm::vec2 deltaUV2 = vertex3.uv - vertex1.uv;
+
+			float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+
+			glm::vec3 tangent;
+			tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+			tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+			tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+
+			vertex1.tangent = tangent;
+			vertex2.tangent = tangent;
+			vertex3.tangent = tangent;
+		}
 	};
-	*/
 
 	void createQuad(float width, float height, MeshData& meshData) {
 		meshData.vertices.clear();

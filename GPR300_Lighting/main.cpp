@@ -202,40 +202,6 @@ public:
 
 		// Attach render buffer object to the frame buffer
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
-		
-		/*
-		* Shadow mapping portion
-		*/
-
-		// Is this setup different from that in the render buffer?
-		// Does it source it's texture image from that of the depth
-		// buffer held in the render buffer?
-
-		// Replace depth render buffer object with the texture?
-
-		// Reserve space for the depth buffer texture.
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-
-		// Attach the depth texture to the framebuffer
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
-
-		// The above two function calls may be irrelevant here.
-		// Apparently the depth only FBO has to specifically
-		// not draw colors, specified as such with glDrawBuffer(GL_NONE)
-		// among other things, so the next line would cause
-		// conflicts. It also should ONLY have a depth component
-		// (and texture component in the form of the depth
-		// component texture I guess?), which isn't possible
-		// within this class setup.
-
-		// The scene is drawn into the shadow map specifically?
-
-		// Should I handle this with an override?
-
-		// Consider getting Render Doc if any issues pop up in testing
-		// Also consider splitting scene draws into different functions.
-		// Models and such were put in global scope for the sake of
-		// having it work. Bad architecture but it doesn't matter here.
 
 		// Specify how many attachments are being used in drawing
 		glDrawBuffers(mTexturesLength, attachments);
@@ -287,6 +253,110 @@ private:
 	int mTexturesLength;
 };
 
+class ShadowBuffer
+{
+public:
+	ShadowBuffer(int width, int height)
+	{
+		mWidth = width;
+		mHeight = height;
+
+		glGenFramebuffers(1, &fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+		glGenTextures(1, &depthTexture);
+		glBindTexture(GL_TEXTURE_2D, depthTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, mWidth, mHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+
+		glDrawBuffer(GL_NONE);
+		glReadBuffer(GL_NONE);
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			printf("Frame buffer is incomplete.\n");
+		}
+
+		else
+		{
+			printf("Successfully created frame buffer.\n");
+		}
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
+	~ShadowBuffer()
+	{
+		
+	}
+
+	unsigned int getFBO() { return fbo; }
+	unsigned int getTexture() { return depthTexture; }
+
+private:
+	unsigned int fbo;
+	unsigned int depthTexture;
+
+	int mWidth, mHeight;
+};
+
+// Models
+// Global for the sake of convenience
+ew::Transform cubeTransform;
+ew::Transform rectangleTransform;
+ew::Transform sphereTransform;
+ew::Transform planeTransform;
+ew::Transform cylinderTransform;
+ew::Transform quadTransform;
+ew::Transform depthQuadTransform;
+ew::Transform lightTransform;
+
+ew::MeshData cubeMeshData;
+ew::MeshData sphereMeshData;
+ew::MeshData rectangleMeshData;
+ew::MeshData planeMeshData;
+ew::MeshData cylinderMeshData;
+ew::MeshData quadMeshData;
+ew::MeshData depthQuadMeshData;
+
+ew::Mesh* cubeMesh;
+ew::Mesh* sphereMesh;
+ew::Mesh* rectangleMesh;
+ew::Mesh* planeMesh;
+ew::Mesh* cylinderMesh;
+ew::Mesh* quadMesh;
+ew::Mesh* depthQuadMesh;
+
+void drawScene(Shader& targetShader, glm::mat4 viewMatrix, glm::mat4 projectionMatrix)
+{
+	targetShader.setMat4("_View", viewMatrix);
+	targetShader.setMat4("_Projection", projectionMatrix);
+
+	//Draw cube
+	targetShader.setMat4("_Model", cubeTransform.getModelMatrix());
+	cubeMesh->draw();
+
+	//Draw rectangle
+	targetShader.setMat4("_Model", rectangleTransform.getModelMatrix());
+	rectangleMesh->draw();
+
+	//Draw sphere
+	targetShader.setMat4("_Model", sphereTransform.getModelMatrix());
+	sphereMesh->draw();
+
+	//Draw cylinder
+	targetShader.setMat4("_Model", cylinderTransform.getModelMatrix());
+	cylinderMesh->draw();
+
+	//Draw plane
+	targetShader.setMat4("_Model", planeTransform.getModelMatrix());
+	planeMesh->draw();
+}
+
 int main() {
 	if (!glfwInit()) {
 		printf("glfw failed to init");
@@ -325,31 +395,33 @@ int main() {
 	//Used to draw light sphere
 	Shader unlitShader("shaders/defaultLit.vert", "shaders/unlit.frag");
 
-	// Used for the shadow buffer
-	Shader shadowShader("shaders/shadows.vert", "shaders/shadows.frag");
+	// Used to draw to the depth buffer only
+	Shader depthOnly("shaders/depthOnly.vert", "shaders/depthOnly.frag");
 
 	// Used to draw post processing effects
 	Shader postProc("shaders/postProcessing.vert", "shaders/postProcessing.frag");
 
 	// Create frame buffer instance with two frame buffers
-	FrameBuffer screenBuffer = FrameBuffer(2, SCREEN_WIDTH, SCREEN_HEIGHT);
+	FrameBuffer screenBuffer = FrameBuffer(1, SCREEN_WIDTH, SCREEN_HEIGHT);
 
 	// Create frame buffer to manage shadow depth buffer
-	FrameBuffer depthBuffer = FrameBuffer(1, SCREEN_WIDTH, SCREEN_HEIGHT);
+	ShadowBuffer depthBuffer = ShadowBuffer(2048, 2048);
 
-	ew::MeshData cubeMeshData;
 	ew::createCube(1.0f, 1.0f, 1.0f, cubeMeshData);
-	ew::MeshData sphereMeshData;
+	ew::createCube(1.0f, 2.0f, 1.0f, rectangleMeshData);
 	ew::createSphere(0.5f, 64, sphereMeshData);
-	ew::MeshData cylinderMeshData;
+	ew::createPlane(1.0f, 1.0f, planeMeshData);
 	ew::createCylinder(1.0f, 0.5f, 64, cylinderMeshData);
-	ew::MeshData quadMeshData;
 	ew::createQuad(2.0f, 2.0f, quadMeshData);
+	ew::createQuad(0.5f, 0.5f, depthQuadMeshData);
 
-	ew::Mesh cubeMesh(&cubeMeshData);
-	ew::Mesh sphereMesh(&sphereMeshData);
-	ew::Mesh cylinderMesh(&cylinderMeshData);
-	ew::Mesh quadMesh(&quadMeshData);
+	cubeMesh = new ew::Mesh(&cubeMeshData);
+	rectangleMesh = new ew::Mesh(&rectangleMeshData);
+	sphereMesh = new ew::Mesh(&sphereMeshData);
+	planeMesh = new ew::Mesh(&planeMeshData);
+	cylinderMesh = new ew::Mesh(&cylinderMeshData);
+	quadMesh = new ew::Mesh(&quadMeshData);
+	depthQuadMesh = new ew::Mesh(&depthQuadMeshData);
 
 	//Enable back face culling
 	glEnable(GL_CULL_FACE);
@@ -363,17 +435,11 @@ int main() {
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
 
-	//Initialize shape transforms
-	ew::Transform cubeTransform;
-	ew::Transform sphereTransform;
-	ew::Transform planeTransform;
-	ew::Transform cylinderTransform;
-	ew::Transform lightTransform;
-
-	ew::Transform quadTransform;
 	quadTransform.position = glm::vec3(0.0f, 0.0f, 0.0f);
+	depthQuadTransform.position = glm::vec3(0.5f, 0.5f, 0.0f);
 
 	cubeTransform.position = glm::vec3(-2.0f, 0.0f, 0.0f);
+	rectangleTransform.position = glm::vec3(0.0f, 0.0f, -2.0f);
 	sphereTransform.position = glm::vec3(0.0f, 0.0f, 0.0f);
 
 	planeTransform.position = glm::vec3(0.0f, -1.0f, 0.0f);
@@ -390,15 +456,13 @@ int main() {
 	_Material.specularK = 1;
 	_Material.shininess = 1;
 
-	numPointLights = 1;
-	pointLightOrbitCenter = glm::vec3(0, 5, 0);
-	pointLightOrbitSpeed = 1;
-	pointLightOrbitRange = 10;
-	_PointLight.light.color = glm::vec3(1, 1, 1);
-	_PointLight.light.intensity = 1;
-	_PointLight.constK = 1;
-	_PointLight.linearK = 1;
-	_PointLight.quadraticK = 0.5;
+	_DirectionalLight.direction = glm::vec3(2, 2, 2);
+	_DirectionalLight.light.intensity = 0.5f;
+	_DirectionalLight.light.color = glm::vec3(1, 1, 1);
+
+	float minBias = 0.000f;
+	float maxBias = 0.001f;
+	bool showShadowMap = false;
 
 	const char* effectNames[5] = { "None", "Invert", "Red Overlay", "Zooming Out", "Wave"};
 	int effectIndex = 0;
@@ -406,12 +470,6 @@ int main() {
 	GLuint brickTexture = getTexture("Bricks.jpg");
 	GLuint tileTexture = getTexture("Tiles.jpg");
 	GLuint brickNormal = getTexture("BricksNormal.jpg");
-
-	float scrollSpeedX = 0;
-	float scrollSpeedY = 0;
-	float scalingX = 1;
-	float scalingY = 1;
-	float normalIntensity = 1;
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, brickTexture);
@@ -430,15 +488,6 @@ int main() {
 		processInput(window);
 		glClearColor(bgColor.r,bgColor.g,bgColor.b, 1.0f);
 
-		// Set active frame buffer to screenBuffer
-		glBindFramebuffer(GL_FRAMEBUFFER, screenBuffer.getFBO());
-
-		// Enable depth testing for 3D sorting
-		glEnable(GL_DEPTH_TEST);
-
-		// Clear screenBuffer (was here before)
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
@@ -447,60 +496,37 @@ int main() {
 		deltaTime = time - lastFrameTime;
 		lastFrameTime = time;
 
+		depthOnly.use();
+
+		glViewport(0, 0, 2048, 2048);
+		glBindFramebuffer(GL_FRAMEBUFFER, depthBuffer.getFBO());
+
+		glEnable(GL_DEPTH_TEST);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		glm::mat4 lightView = glm::lookAt(_DirectionalLight.direction, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 1.0f, 200.0f);
+
+		glCullFace(GL_FRONT);
+		drawScene(depthOnly, lightView, lightProjection);
+
+		// Set active frame buffer to screenBuffer
+		glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+		glBindFramebuffer(GL_FRAMEBUFFER, screenBuffer.getFBO());
+
+		// Enable depth testing for 3D sorting
+		glEnable(GL_DEPTH_TEST);
+
+		// Clear screenBuffer (was here before)
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 		litShader.use();
 
 		litShader.setFloat("time", time);
-		litShader.setMat4("_Projection", camera.getProjectionMatrix());
-		litShader.setMat4("_View", camera.getViewMatrix());
 
-		litShader.setFloat("scrollSpeedX", scrollSpeedX);
-		litShader.setFloat("scrollSpeedY", scrollSpeedY);
-		litShader.setFloat("scalingX", scalingX);
-		litShader.setFloat("scalingY", scalingY);
-		litShader.setFloat("normalIntensity", normalIntensity);
-
-		/*
 		litShader.setVec3("_DirectionalLight.direction", _DirectionalLight.direction);
 		litShader.setFloat("_DirectionalLight.light.intensity", _DirectionalLight.light.intensity);
 		litShader.setVec3("_DirectionalLight.light.color", _DirectionalLight.light.color);
-		*/
-
-		for (int i = 0; i < numPointLights; i++)
-		{
-			float angle = (360 / numPointLights) * i;
-			angle = glm::radians(angle);
-			glm::vec3 lightPosition = glm::vec3(cos(angle + (time * pointLightOrbitSpeed)) * pointLightOrbitRange, 0, sin(angle + (time * pointLightOrbitSpeed)) * pointLightOrbitRange);
-			lightPosition += pointLightOrbitCenter;
-
-			litShader.setVec3("_PointLights[" + std::to_string(i) + "].position", lightPosition);
-			litShader.setVec3("_PointLights[" + std::to_string(i) + "].light.color", _PointLight.light.color);
-			litShader.setFloat("_PointLights[" + std::to_string(i) + "].light.intensity", _PointLight.light.intensity);
-			litShader.setFloat("_PointLights[" + std::to_string(i) + "].constK", _PointLight.constK);
-			litShader.setFloat("_PointLights[" + std::to_string(i) + "].linearK", _PointLight.linearK);
-			litShader.setFloat("_PointLights[" + std::to_string(i) + "].quadraticK", _PointLight.quadraticK);
-
-			unlitShader.use();
-			unlitShader.setMat4("_Projection", camera.getProjectionMatrix());
-			unlitShader.setMat4("_View", camera.getViewMatrix());
-
-			lightTransform.position = lightPosition;
-			unlitShader.setMat4("_Model", lightTransform.getModelMatrix());
-			unlitShader.setVec3("_Color", _PointLight.light.color);
-			sphereMesh.draw();
-		}
-		litShader.use();
-		litShader.setInt("lightCount", numPointLights);
-
-		/*
-		litShader.setVec3("_SpotLight.position", _SpotLight.position);
-		litShader.setVec3("_SpotLight.direction", _SpotLight.direction);
-		litShader.setFloat("_SpotLight.light.intensity", _SpotLight.light.intensity);
-		litShader.setVec3("_SpotLight.light.color", _SpotLight.light.color);
-		litShader.setFloat("_SpotLight.range", _SpotLight.range);
-		litShader.setFloat("_SpotLight.innerAngle", _SpotLight.innerAngle);
-		litShader.setFloat("_SpotLight.outerAngle", _SpotLight.outerAngle);
-		litShader.setFloat("_SpotLight.angleFalloff", _SpotLight.angleFalloff);
-		*/
 
 		litShader.setVec3("_Material.color", _Material.color);
 		litShader.setFloat("_Material.ambientK", _Material.ambientK);
@@ -508,38 +534,26 @@ int main() {
 		litShader.setFloat("_Material.specularK", _Material.specularK);
 		litShader.setFloat("_Material.shininess", _Material.shininess);
 
+		litShader.setMat4("_LightViewProj", lightProjection * lightView);
 		litShader.setVec3("_CameraPosition", camera.getPosition());
-
-		//Draw cube
-		litShader.setMat4("_Model", cubeTransform.getModelMatrix());
-		cubeMesh.draw();
-
-		//Draw sphere
-		litShader.setMat4("_Model", sphereTransform.getModelMatrix());
-		sphereMesh.draw();
-
-		//Draw cylinder
-		litShader.setMat4("_Model", cylinderTransform.getModelMatrix());
-		cylinderMesh.draw();
-
-		//Draw plane
-		litShader.setMat4("_Model", planeTransform.getModelMatrix());
-		//planeMesh.draw();
-
-		// Switch active frame buffer back to the default buffer
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		
-		// Use shadow shader
-		shadowShader.use();
+		litShader.setFloat("_MinBias", minBias);
+		litShader.setFloat("_MaxBias", maxBias);
 
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_2D, depthBuffer.getTexture());
+		litShader.setInt("_ShadowMap", 3);
 
+		glCullFace(GL_BACK);
+		drawScene(litShader, camera.getViewMatrix(), camera.getProjectionMatrix());
 
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 		// Disable depth testing
 		glDisable(GL_DEPTH_TEST);
 
 		// Clear color buffer bit
-		glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Set post processing shader
 		postProc.use();
@@ -553,64 +567,36 @@ int main() {
 		postProc.setFloat("time", time);
 
 		// Draw screen quad
-		quadMesh.draw();
+		postProc.setMat4("_Model", quadTransform.getModelMatrix());
+		quadMesh->draw();
+
+		if (showShadowMap)
+		{
+			glBindTexture(GL_TEXTURE_2D, depthBuffer.getTexture());
+			postProc.setInt("_Texture1", 4);
+
+			postProc.setMat4("_Model", depthQuadTransform.getModelMatrix());
+			depthQuadMesh->draw();
+		}
 
 		//Draw UI
-		/*
 		ImGui::Begin("Directional Light");
 
-		ImGui::DragFloat3("Direction", &_DirectionalLight.direction.x, 1, 0, 360);
-		ImGui::DragFloat("Intensity", &_DirectionalLight.light.intensity, 0.01, 0, 1);
+		ImGui::DragFloat3("Direction", &_DirectionalLight.direction.x, 1, -360, 360);
+		ImGui::DragFloat("Intensity", &_DirectionalLight.light.intensity, 0.01, 0.01, 1);
 		ImGui::ColorEdit3("Color", &_DirectionalLight.light.color.r);
-		ImGui::End();
-		*/
-
-		ImGui::Begin("Point Light");
-		ImGui::DragInt("Number of Lights", &numPointLights, 1, 0, 8);
-		ImGui::DragFloat("Intensity", &_PointLight.light.intensity, 0.01, 0, 1);
-		ImGui::DragFloat("Constant Coefficient", &_PointLight.constK, 0.01, 0, 1);
-		ImGui::DragFloat("Linear Coefficient", &_PointLight.linearK, 0.01, 0, 1);
-		ImGui::DragFloat("Quadratic Coefficient", &_PointLight.quadraticK, 0.01, 0, 1);
-		ImGui::DragFloat3("Orbit Center", &pointLightOrbitCenter.x);
-		ImGui::DragFloat("Orbit Radius", &pointLightOrbitRange);
-		ImGui::DragFloat("Orbit Speed", &pointLightOrbitSpeed);
-		ImGui::End();
-
-		/*
-		ImGui::Begin("Spot Light");
-
-		ImGui::DragFloat3("Position", &_SpotLight.position.x);
-		ImGui::DragFloat3("Direction", &_SpotLight.direction.x, 0.01, -1, 1);
-		ImGui::DragFloat("Intensity", &_SpotLight.light.intensity, 0.01, 0, 1);
-		ImGui::ColorEdit3("Color", &_SpotLight.light.color.r);
-		ImGui::DragFloat("Range", &_SpotLight.range, 1, 0, 30);
-		ImGui::DragFloat("Inner Angle", &_SpotLight.innerAngle, 1, 0, 180);
-		ImGui::DragFloat("Outer Angle", &_SpotLight.outerAngle, 1, 0, 180);
-		ImGui::DragFloat("Angle Falloff", &_SpotLight.angleFalloff, 0.01, 0, 5);
-		ImGui::End();
-
-		ImGui::Begin("Material");
-
-		ImGui::ColorEdit3("Color", &_Material.color.r);
-		ImGui::DragFloat("Ambient", &_Material.ambientK, 0.01, 0, 1);
-		ImGui::DragFloat("Diffuse", &_Material.diffuseK, 0.01, 0, 1);
-		ImGui::DragFloat("Specular", &_Material.specularK, 0.01, 0, 1);
-		ImGui::DragFloat("Shininess", &_Material.shininess, 1, 1, 512);
-		ImGui::End();
-		*/
-
-		ImGui::Begin("Texture");
-
-		ImGui::DragFloat("Scroll Speed X", &scrollSpeedX, 0.1, -1, 1);
-		ImGui::DragFloat("Scroll Speed Y", &scrollSpeedY, 0.1, -1, 1);
-		ImGui::DragFloat("Scale X", &scalingX, 1, 1, 5);
-		ImGui::DragFloat("Scale Y", &scalingY, 1, 1, 5);
-		ImGui::DragFloat("Normal Intensity", &normalIntensity, 0.1, 0, 1);
 		ImGui::End();
 
 		ImGui::Begin("Post Processing");
 
 		ImGui::Combo("Effects", &effectIndex, effectNames, IM_ARRAYSIZE(effectNames));
+		ImGui::End();
+
+		ImGui::Begin("Shadows");
+
+		ImGui::DragFloat("Min Bias", &minBias, 0.001f, 0.001f, 0.1f);
+		ImGui::DragFloat("Max Bias", &maxBias, 0.001f, 0.001f, 0.1f);
+		ImGui::Checkbox("Show Shadow Map", &showShadowMap);
 		ImGui::End();
 
 		ImGui::Render();

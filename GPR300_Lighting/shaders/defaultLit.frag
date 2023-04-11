@@ -1,11 +1,6 @@
 #version 450                          
 layout (location = 0) out vec4 FragColor;
-layout (location = 1) out vec4 BrightColor;
 
-/*
-* Takes in the vertex struct provided
-* by the vertex shader.
-*/
 in struct Vertex
 {
     vec3 worldNormal;
@@ -14,23 +9,16 @@ in struct Vertex
 }vertexOutput;
 
 in mat3 TBN;
+in vec4 lightSpacePos;
 
-/*
-* Struct to manage a model's material
-* values, utilized by the different
-* components of phong shading
-*/
 struct Material
 {
     vec3 color;
-    float ambientK, diffuseK, specularK; // (0-1 range)
-    float shininess; // (0-512 range)
+    float ambientK, diffuseK, specularK;
+    float shininess;
     float normalIntensity;
 };
 
-/*
-* Structs to manage light data
-*/
 struct Light
 {
     vec3 color;
@@ -63,35 +51,19 @@ struct SpotLight
     float angleFalloff;
 };
 
-const int MAX_LIGHTS = 8;
-uniform int lightCount;
-
 uniform DirectionalLight _DirectionalLight;
-uniform PointLight[MAX_LIGHTS] _PointLights;
-uniform SpotLight _SpotLight;
 uniform Material _Material;
 uniform vec3 _CameraPosition;
 
 uniform sampler2D _Texture1;
 uniform sampler2D _Texture2;
+uniform sampler2D _ShadowMap;
 uniform sampler2D _Normal;
 
 uniform float time;
-uniform float scrollSpeedX;
-uniform float scrollSpeedY;
-uniform float scalingX;
-uniform float scalingY;
-uniform float normalIntensity;
+uniform float _MinBias;
+uniform float _MaxBias;
 
-/*
-* Calculates the ambient of a light.
-*
-* Combines the light's color and intensity
-* to find the intensity of the light's color,
-* then multiplies that value by the ambient
-* coefficient to get the surface's reflection
-* of the light.
-*/
 float calcAmbient(float ambientCoefficient)
 {
     float ambientRet;
@@ -101,17 +73,6 @@ float calcAmbient(float ambientCoefficient)
     return ambientRet;
 }
 
-/*
-* Calculates the diffuse of a light
-* using Lambert's cosine law. 
-*
-* Uses the dot product of the direction
-* to the vertex from the light and the
-* vertex's normal to calculate the angle
-* between the two, fulfilling the requirement
-* of needing the cosine angle for the cosine
-* law.
-*/
 float calcDiffuse(float diffuseCoefficient, vec3 lightDirection, vec3 vertexNormal)
 {
     float diffuseRet;
@@ -124,11 +85,6 @@ float calcDiffuse(float diffuseCoefficient, vec3 lightDirection, vec3 vertexNorm
     return diffuseRet;
 };
 
-/*
-* Calculates the specular of a light.
-*
-* 
-*/
 float calcSpecular(float specularCoefficient, vec3 lightDirection, vec3 vertexPosition, vec3 vertexNormal, float shininess, vec3 cameraPosition)
 {
     float specularRet;
@@ -164,7 +120,6 @@ float calcGLAttenuation(PointLight light, vec3 vertPos)
     float dist = distance(light.position, vertPos);
 
     attenuation = 1 / (light.constK + light.linearK + (light.quadraticK * dist));
-    //attenuation = clamp(attenuation, 0, attenuation);
 
     return attenuation;
 }
@@ -186,43 +141,50 @@ float calcAngularAttenuation(SpotLight light, vec3 vertPos)
     return attenuation;
 }
 
+float calcShadow(sampler2D shadowMap, vec4 lightSpacePos, vec3 normal, vec3 lightDir)
+{
+    vec3 sampleCoord = lightSpacePos.xyz / lightSpacePos.w;
+    sampleCoord = sampleCoord * 0.5 + 0.5;
+
+    float shadowMapDepth = texture(shadowMap, sampleCoord.xy).r;
+
+    float minBias = _MinBias;//0.005f;
+    float maxBias = _MaxBias;//0.015f;
+
+    float bias = max(maxBias * (1.0f - dot(normal, lightDir)), minBias);
+    float depth = sampleCoord.z - bias;
+
+    float shadow = 0.0f;
+
+    vec2 texelOffset = 1.0 / textureSize(shadowMap, 0);
+
+    for (int x = -1; x <= 1; x++)
+    {
+        for (int y = -1; y <= 1; y++)
+        {
+            vec2 uv = sampleCoord.xy + vec2(x * texelOffset.x, y * texelOffset.y);
+            shadow += step(texture(shadowMap, uv).r, depth);
+        }
+    }
+    shadow /= 10f;
+
+    return shadow;
+}
+
 void main(){ 
-    // Calculate new normal from normal map, convert it
-    // out of tangent space with the TBN matrix, and
-    // pass it into a new vertex variable.
     vec3 normal = texture(_Normal, vertexOutput.uv).rgb;
     normal = (normal * 2.0f) - 1.0f;
-    normal.r = normal.r * normalIntensity;
-    normal.g = normal.g * normalIntensity;
     normal = normalize(normal * TBN);
-    
 
     Vertex newVertex = vertexOutput;
     newVertex.worldNormal = normal;
 
     vec3 lightCol;
+    float shadow = calcShadow(_ShadowMap, lightSpacePos, vertexOutput.worldNormal, _DirectionalLight.direction);
 
-    // Point Lights
-    for (int i = 0; i < lightCount; i++)
-    {
-        lightCol += calcPhong(newVertex, _Material, _PointLights[i].light, (_PointLights[i].position - newVertex.worldPosition), _CameraPosition) * calcGLAttenuation(_PointLights[i], newVertex.worldPosition);
-    }
+    lightCol += calcPhong(newVertex, _Material, _DirectionalLight.light, _DirectionalLight.direction, _CameraPosition) * (1.0 - shadow);
 
     vec2 modifiedUV = vertexOutput.uv;
-    modifiedUV.x = (scrollSpeedX * time) + scalingX * modifiedUV.x;
-    modifiedUV.y = (scrollSpeedY * time) + scalingY * modifiedUV.y;
 
     FragColor = texture(_Texture1, vertexOutput.uv) * vec4(lightCol * _Material.color, 1.0f);
-
-    // Only pass fragments into the BrightColor output if their value is above a certain threshold
-    float brightness = dot(FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-    
-    if (brightness > 1.0)
-    {
-        BrightColor = vec4(FragColor.rgb, 1.0);
-    }
-    else
-    {
-        BrightColor = vec4(0);
-    }
 }
